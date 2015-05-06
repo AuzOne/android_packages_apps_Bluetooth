@@ -96,6 +96,8 @@ public class BluetoothOppService extends Service {
     /** Class to handle Notification Manager updates */
     private BluetoothOppNotification mNotifier;
 
+    private boolean mPendingUpdate = true;
+
     private UpdateThread mUpdateThread;
 
     private ArrayList<BluetoothOppShareInfo> mShares;
@@ -141,6 +143,8 @@ public class BluetoothOppService extends Service {
      */
     private BluetoothOppObexServerSession mServerSession;
 
+    BluetoothOppManager mOppManager = null;
+
     @Override
     public IBinder onBind(Intent arg0) {
         throw new UnsupportedOperationException("Cannot bind to Bluetooth OPP Service");
@@ -163,14 +167,11 @@ public class BluetoothOppService extends Service {
         mNotifier.mNotificationMgr.cancelAll();
 
         final ContentResolver contentResolver = getContentResolver();
-        new Thread("trimDatabase") {
-            public void run() {
-                synchronized (BluetoothOppService.this) {
-                    trimDatabase(contentResolver);
-                }
-            }
-        }.start();
+        synchronized (BluetoothOppService.this) {
+            trimDatabase(contentResolver);
+        }
 
+        mOppManager = BluetoothOppManager.getInstance(this);
         IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
         registerReceiver(mBluetoothReceiver, filter);
 
@@ -180,6 +181,7 @@ public class BluetoothOppService extends Service {
             } else {
                 startListener();
             }
+            mOppManager.isOPPServiceUp = true;
         }
         if (V) {
             BluetoothOppPreference mPreference = BluetoothOppPreference.getInstance(this);
@@ -379,6 +381,7 @@ public class BluetoothOppService extends Service {
     public void onDestroy() {
         if (V) Log.v(TAG, "Service onDestroy");
         super.onDestroy();
+        mOppManager.isOPPServiceUp = false;
         getContentResolver().unregisterContentObserver(mObserver);
         unregisterReceiver(mBluetoothReceiver);
         mRfcommSocketListener.stop();
@@ -448,7 +451,9 @@ public class BluetoothOppService extends Service {
     };
 
     private void updateFromProvider() {
+        if (V) Log.v(TAG, "Updating the provider");
         synchronized (BluetoothOppService.this) {
+            mPendingUpdate = true;
             if ((mUpdateThread == null) && (mAdapter != null)
                 && mAdapter.isEnabled()) {
                 if (V) Log.v(TAG, "Starting a new thread");
@@ -477,6 +482,7 @@ public class BluetoothOppService extends Service {
                     }
                     if (V) Log.v(TAG, "keepUpdateThread is " + keepService + " sListenStarted is "
                             + mListenStarted);
+                    mPendingUpdate = false;
                 }
                 Cursor cursor;
                 try {
@@ -627,15 +633,16 @@ public class BluetoothOppService extends Service {
                 }
 
                 try {
-                    if (((mServerSession != null) || (mTransfer != null))
-                            && mPowerManager.isScreenOn()) {
+                    if (mPowerManager.isScreenOn()) {
                         Thread.sleep(BluetoothShare.UI_UPDATE_INTERVAL);
                     }
                 } catch (InterruptedException e) {
                     if (V) Log.v(TAG, "OppService Thread sleep is interrupted (1), exiting");
                     return;
                 }
-            } while (mPowerManager.isScreenOn() && ((mServerSession != null) || (mTransfer != null)));
+
+                if(V) Log.v(TAG, "PendingUpdate is " + mPendingUpdate);
+            } while (mPendingUpdate);
 
             synchronized (BluetoothOppService.this) {
                 mUpdateThread = null;
@@ -834,7 +841,9 @@ public class BluetoothOppService extends Service {
         info.mVisibility = newVisibility;
 
         if (info.mConfirm == BluetoothShare.USER_CONFIRMATION_PENDING
-                && newConfirm != BluetoothShare.USER_CONFIRMATION_PENDING) {
+            && (newConfirm == BluetoothShare.USER_CONFIRMATION_CONFIRMED ||
+                newConfirm == BluetoothShare.USER_CONFIRMATION_AUTO_CONFIRMED ||
+                newConfirm == BluetoothShare.USER_CONFIRMATION_HANDOVER_CONFIRMED)) {
             confirmUpdated = true;
         }
         info.mConfirm = newConfirm;

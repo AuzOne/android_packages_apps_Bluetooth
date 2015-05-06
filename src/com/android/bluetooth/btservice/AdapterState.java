@@ -120,6 +120,7 @@ final class AdapterState extends StateMachine {
         @Override
         public boolean processMessage(Message msg) {
             AdapterService adapterService = mAdapterService;
+            AdapterProperties adapterProperties = mAdapterProperties;
             if (adapterService == null) {
                 Log.e(TAG,"receive message at OffState after cleanup:" +
                           msg.what);
@@ -132,6 +133,7 @@ final class AdapterState extends StateMachine {
                    mPendingCommandState.setTurningOn(true);
                    transitionTo(mPendingCommandState);
                    sendMessageDelayed(START_TIMEOUT, START_TIMEOUT_DELAY);
+                   adapterProperties.onBluetoothEnable();
                    adapterService.processStart();
                    break;
                case USER_TURN_OFF:
@@ -333,6 +335,7 @@ final class AdapterState extends StateMachine {
                     adapterService.ssrcleanupNative(false);
                     mPendingCommandState.setTurningOn(false);
                     transitionTo(mOffState);
+                    adapterService.stopProfileServices();
                     notifyAdapterStateChange(BluetoothAdapter.STATE_OFF);
                     break;
                 case STOP_TIMEOUT:
